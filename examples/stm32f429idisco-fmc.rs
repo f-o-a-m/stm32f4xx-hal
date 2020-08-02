@@ -13,8 +13,8 @@ use stm32f4xx_hal as hal;
 
 use core::fmt::Write;
 use hal::fmc::{
-    SDRAMAddressWidth, SDRAMCommand, SDRAMCommandTargetBank, SDRAMConfig, SDRAMDataWidth,
-    SDRAMTiming, UseSDRAMBank2, CAS_A, MODE_AW, NB_A, NC_A, NR_A, RPIPE_A, SDCLK_A,
+    SDRAMAddressBus, SDRAMCommand, SDRAMCommandTargetBank, SDRAMConfig, SDRAMDataBus, SDRAMTiming,
+    UseSDRAMBank2, CAS_A, MODE_AW, NC_A, NR_A, RPIPE_A, SDCLK_A,
 };
 use hal::serial::{config::Config as SerialConfig, config::StopBits::STOP1, Serial};
 use hal::{prelude::*, stm32};
@@ -34,9 +34,16 @@ fn main() -> ! {
             .pclk1(42.mhz())
             .pclk2(84.mhz())
             .freeze();
+        let gpioa = dp.GPIOA.split();
+        let gpiob = dp.GPIOB.split();
+        let gpioc = dp.GPIOC.split();
+        let gpiod = dp.GPIOD.split();
+        let gpioe = dp.GPIOE.split();
+        let gpiof = dp.GPIOF.split();
+        let gpiog = dp.GPIOG.split();
 
         // get our USART going  -- usart1 is connected to the stlink on the discovery board
-        let gpioa = dp.GPIOA.split();
+
         let u1tx = gpioa.pa9.into_alternate_af7();
         let u1rx = gpioa.pa10.into_alternate_af7();
         let serial_config = SerialConfig::default()
@@ -50,19 +57,62 @@ fn main() -> ! {
         // Create a delay abstraction based on SysTick
         let mut delay = hal::delay::Delay::new(cp.SYST, clocks);
 
-        let gpiob = dp.GPIOB.split();
-        let gpioc = dp.GPIOC.split();
+        let address_bus = SDRAMAddressBus::AddressBus12 {
+            a0: gpiof.pf0.into_alternate_af12(),
+            a1: gpiof.pf1.into_alternate_af12(),
+            a2: gpiof.pf2.into_alternate_af12(),
+            a3: gpiof.pf3.into_alternate_af12(),
+            a4: gpiof.pf4.into_alternate_af12(),
+            a5: gpiof.pf5.into_alternate_af12(),
+            a6: gpiof.pf12.into_alternate_af12(),
+            a7: gpiof.pf13.into_alternate_af12(),
+            a8: gpiof.pf14.into_alternate_af12(),
+            a9: gpiof.pf15.into_alternate_af12(),
+            a10: gpiog.pg0.into_alternate_af12(),
+            a11: gpiog.pg1.into_alternate_af12(),
+        };
+
+        let data_bus = SDRAMDataBus::DataBus16 {
+            d0: gpiod.pd14.into_alternate_af12(),
+            d1: gpiod.pd15.into_alternate_af12(),
+            d2: gpiod.pd0.into_alternate_af12(),
+            d3: gpiod.pd1.into_alternate_af12(),
+            d4: gpioe.pe7.into_alternate_af12(),
+            d5: gpioe.pe8.into_alternate_af12(),
+            d6: gpioe.pe9.into_alternate_af12(),
+            d7: gpioe.pe10.into_alternate_af12(),
+            d8: gpioe.pe11.into_alternate_af12(),
+            d9: gpioe.pe12.into_alternate_af12(),
+            d10: gpioe.pe13.into_alternate_af12(),
+            d11: gpioe.pe14.into_alternate_af12(),
+            d12: gpioe.pe15.into_alternate_af12(),
+            d13: gpiod.pd8.into_alternate_af12(),
+            d14: gpiod.pd9.into_alternate_af12(),
+            d15: gpiod.pd10.into_alternate_af12(),
+        };
+
         let sdcke1 = gpiob.pb5.into_alternate_af12();
         let sdne1 = gpiob.pb6.into_alternate_af12();
         let sdnwe = gpioc.pc0.into_alternate_af12();
+
+        let ba0 = gpiog.pg4.into_alternate_af12();
+        let ba1 = gpiog.pg5.into_alternate_af12();
+
+        let nbl0 = gpioe.pe0.into_alternate_af12();
+        let nbl1 = gpioe.pe1.into_alternate_af12();
+        let byte_enable = (nbl0, nbl1);
+
+        let bank_access = (ba0, ba1);
+
+        let sdclk = gpiog.pg8.into_alternate_af12();
+        let sdnras = gpiof.pf11.into_alternate_af12();
+        let sdncas = gpiog.pg15.into_alternate_af12();
+
         let mut sdram = SDRAMConfig {
-            address_width: SDRAMAddressWidth::AW12,
-            data_width: SDRAMDataWidth::DW16 {
-                byte_enable_16: true,
-            },
+            address_bus,
+            data_bus,
             number_of_column_bits: NC_A::BITS8,
             number_of_row_bits: NR_A::BITS12,
-            module_bank_count: NB_A::NB4,
             sdclk_period: SDCLK_A::DIV2,
             rpipe_delay: RPIPE_A::CLOCKS1,
             write_protection: false,
@@ -78,7 +128,16 @@ fn main() -> ! {
                 t_rcd: 2,
             },
         }
-        .configure(UseSDRAMBank2(sdcke1, sdne1), sdnwe);
+        .configure(
+            dp.FMC,
+            bank_access,
+            byte_enable,
+            sdclk,
+            sdnras,
+            sdncas,
+            UseSDRAMBank2(sdcke1, sdne1),
+            sdnwe,
+        );
 
         sdram.send_command(SDRAMCommand {
             command_mode: MODE_AW::CLOCKCONFIGURATIONENABLE,
