@@ -169,6 +169,7 @@ pub enum Buswidth {
 }
 
 /// Clock frequency of a SDIO bus.
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum ClockFreq {
     F24Mhz = 0,
     F16Mhz = 1,
@@ -194,11 +195,12 @@ pub enum Error {
 }
 
 /// A peripheral that uses the SDIO hardware, generic over the particular type of device.
-pub struct Sdio<P: SdioPeripheral> {
+pub struct Sdio<P: SdioPeripheral, PINS: Pins> {
     sdio: SDIO,
     bw: Buswidth,
     card: Option<P>,
     clock: Hertz,
+    pins: PINS,
 }
 
 /// Sd card peripheral
@@ -220,9 +222,9 @@ pub struct Emmc {
     pub csd: CSD<EMMC>,
 }
 
-impl<P: SdioPeripheral> Sdio<P> {
+impl<P: SdioPeripheral, PINS: Pins> Sdio<P, PINS> {
     /// Create and enable the Sdio device
-    pub fn new<PINS: Pins>(sdio: SDIO, _pins: PINS, clocks: &Clocks) -> Self {
+    pub fn new(sdio: SDIO, pins: PINS, clocks: &Clocks) -> Self {
         unsafe {
             //NOTE(unsafe) this reference will only be used for atomic writes with no side effects
             let rcc = &*RCC::ptr();
@@ -254,6 +256,7 @@ impl<P: SdioPeripheral> Sdio<P> {
             bw: PINS::BUSWIDTH,
             card: None,
             clock: clocks.sysclk(),
+            pins
         };
 
         // Make sure card is powered off
@@ -523,7 +526,7 @@ impl<P: SdioPeripheral> Sdio<P> {
     }
 }
 
-impl Sdio<SdCard> {
+impl<PINS: Pins> Sdio<SdCard, PINS> {
     /// Initializes card (if present) and sets the bus at the specified frequency.
     pub fn init(&mut self, freq: ClockFreq) -> Result<(), Error> {
         // Enable power to card
@@ -705,9 +708,13 @@ impl Sdio<SdCard> {
         });
         Ok(())
     }
+
+    pub fn release(self) -> (SDIO, PINS) {
+        (self.sdio, self.pins)
+    }
 }
 
-impl Sdio<Emmc> {
+impl<PINS: Pins> Sdio<Emmc, PINS> {
     /// Initializes eMMC device (if present) and sets the bus at the specified frequency.
     pub fn init(&mut self, freq: ClockFreq) -> Result<(), Error> {
         let card_addr: RCA<EMMC> = RCA::from(1u16);
