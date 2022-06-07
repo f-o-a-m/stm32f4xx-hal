@@ -256,7 +256,7 @@ impl<P: SdioPeripheral, PINS: Pins> Sdio<P, PINS> {
             bw: PINS::BUSWIDTH,
             card: None,
             clock: clocks.sysclk(),
-            pins
+            pins,
         };
 
         // Make sure card is powered off
