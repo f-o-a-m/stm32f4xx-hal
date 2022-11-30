@@ -939,7 +939,10 @@ where
     /// of an ongoing transfer only if not using double buffering, in that case, the current
     /// transfer will be canceled and a new one will be started. A `NotReady` error will be returned
     /// if this method is called before the end of a transfer while double buffering.
-    pub fn next_transfer(&mut self, new_buf: BUF) -> Result<(BUF, CurrentBuffer), DMAError<BUF>> {
+    pub fn next_transfer(
+        &mut self,
+        new_buf: BUF,
+    ) -> Result<(BUF, usize, CurrentBuffer), DMAError<BUF>> {
         let ptr_and_len = {
             // NOTE(unsafe) We now own this buffer and we won't call any &mut methods on it until the
             // end of the DMA transfer
@@ -1087,7 +1090,7 @@ where
     pub fn next_transfer(
         &mut self,
         mut new_buf: BUF,
-    ) -> Result<(BUF, CurrentBuffer), DMAError<BUF>> {
+    ) -> Result<(BUF, usize, CurrentBuffer), DMAError<BUF>> {
         let ptr_and_len = {
             // NOTE(unsafe) We now own this buffer and we won't call any &mut methods on it until the
             // end of the DMA transfer
@@ -1219,7 +1222,7 @@ where
     pub fn next_transfer(
         &mut self,
         mut new_buf: BUF,
-    ) -> Result<(BUF, CurrentBuffer), DMAError<BUF>> {
+    ) -> Result<(BUF, usize, CurrentBuffer), DMAError<BUF>> {
         let ptr_and_len = {
             // NOTE(unsafe) We now own this buffer and we won't call any &mut methods on it until the
             // end of the DMA transfer
@@ -1446,12 +1449,13 @@ where
         new_buf: BUF,
         ptr_and_len: (u32, u16),
         double_buffering: bool,
-    ) -> Result<(BUF, CurrentBuffer), DMAError<BUF>> {
+    ) -> Result<(BUF, usize, CurrentBuffer), DMAError<BUF>> {
         if double_buffering {
             if !STREAM::get_transfer_complete_flag() {
                 return Err(DMAError::NotReady(new_buf));
             }
             self.stream.clear_transfer_complete_interrupt();
+
             let (new_buf_ptr, new_buf_len) = ptr_and_len;
 
             // We can't change the transfer length while double buffering
@@ -1462,6 +1466,8 @@ where
             if STREAM::current_buffer() == CurrentBuffer::DoubleBuffer {
                 // "Preceding reads and writes cannot be moved past subsequent writes"
                 compiler_fence(Ordering::Release);
+                let number_of_transfers = <STREAM as Stream>::get_number_of_transfers() as usize;
+
                 self.stream.set_memory_address(new_buf_ptr as u32);
 
                 // Check if an overrun occurred, the buffer address won't be updated in that case
@@ -1476,10 +1482,16 @@ where
                 let old_buf = self.buf.replace(new_buf);
 
                 // We always have a buffer, so unwrap can't fail
-                return Ok((old_buf.unwrap(), CurrentBuffer::FirstBuffer));
+                return Ok((
+                    old_buf.unwrap(),
+                    number_of_transfers,
+                    CurrentBuffer::FirstBuffer,
+                ));
             } else {
                 // "Preceding reads and writes cannot be moved past subsequent writes"
                 compiler_fence(Ordering::Release);
+                let number_of_transfers = <STREAM as Stream>::get_number_of_transfers() as usize;
+
                 self.stream
                     .set_memory_double_buffer_address(new_buf_ptr as u32);
 
@@ -1495,10 +1507,16 @@ where
                 let old_buf = self.double_buf.replace(new_buf);
 
                 // double buffering, unwrap can never fail
-                return Ok((old_buf.unwrap(), CurrentBuffer::DoubleBuffer));
+                return Ok((
+                    old_buf.unwrap(),
+                    number_of_transfers,
+                    CurrentBuffer::DoubleBuffer,
+                ));
             }
         }
         self.stream.disable();
+        let number_of_transfers = <STREAM as Stream>::get_number_of_transfers() as usize;
+
         self.stream.clear_transfer_complete_interrupt();
 
         // "No re-ordering of reads and writes across this point is allowed"
@@ -1513,7 +1531,11 @@ where
             self.stream.enable();
         }
 
-        Ok((old_buf.unwrap(), CurrentBuffer::FirstBuffer))
+        Ok((
+            old_buf.unwrap(),
+            number_of_transfers,
+            CurrentBuffer::FirstBuffer,
+        ))
     }
 
     /// # Safety
