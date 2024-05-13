@@ -626,7 +626,10 @@ where
 
     fn write_data_reg(&mut self, data: W) {
         // NOTE(write_volatile) see note above
-        unsafe { ptr::write_volatile(&self.spi.dr as *const _ as *mut W, data) }
+        #[allow(invalid_reference_casting)] // TODO: fix me
+        unsafe {
+            ptr::write_volatile(&self.spi.dr as *const _ as *mut W, data)
+        }
     }
 }
 
