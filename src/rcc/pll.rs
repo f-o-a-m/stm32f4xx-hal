@@ -8,6 +8,7 @@ pub struct MainPll {
     #[allow(dead_code)] // TODO: fix me
     pub m: Option<u32>,
     /// "R" output, required for I2S on STM32F410.
+    #[allow(dead_code)] // TODO: fix me
     pub plli2sclk: Option<u32>,
 }
 
